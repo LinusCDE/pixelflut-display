@@ -36,10 +36,10 @@ fn main() -> Result<()> {
         exit(1);
     })?;
 
-    for conn_index in 0..6 {
+    for conn_index in 0..5 {
         let response_tx = response_tx.clone();
-        //let mut conn = std::net::TcpStream::connect("wall.c3pixelflut.de:1337")?;
-        let mut conn = std::net::TcpStream::connect("table.apokalypse.email:1337")?;
+        let mut conn = std::net::TcpStream::connect("wall.c3pixelflut.de:1337")?;
+        //let mut conn = std::net::TcpStream::connect("table.apokalypse.email:1337")?;
         //let mut conn = std::net::TcpStream::connect("localhost:1337")?;
         // let conn_fd = unsafe { BorrowedFd::borrow_raw(conn.as_raw_fd()) };
         //conn.set_nonblocking(true)?;
