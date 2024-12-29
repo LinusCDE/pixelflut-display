@@ -1,7 +1,11 @@
-use std::io::{ErrorKind, Read, Write};
+#![feature(tcp_quickack)]
+
+use std::io::{Read, Write};
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::exit;
 use std::sync::mpsc::channel;
 use anyhow::{Result, Context};
+use std::os::linux::net::TcpStreamExt;
 
 fn main() -> Result<()> {
     if ! std::env::var("RUST_LOG").is_err() {
@@ -9,7 +13,7 @@ fn main() -> Result<()> {
     }
     env_logger::init();
 
-    let (mut response_tx, response_rx) = channel::<Vec<u8>>();
+    let (response_tx, response_rx) = channel::<Vec<u8>>();
     std::thread::Builder::new().name("Stdouter".to_owned()).spawn(move || {
         while let Ok(response) = response_rx.recv() {
             let response_str = String::from_utf8_lossy(&response);
@@ -32,16 +36,20 @@ fn main() -> Result<()> {
         exit(1);
     })?;
 
-    let mut conn = std::net::TcpStream::connect("wall.c3pixelflut.de:1337")?;
-    //let mut conn = std::net::TcpStream::connect("localhost:1337")?;
-    //conn.set_nonblocking(true)?;
-    conn.set_nodelay(true)?;
-    let width = 3840;
-    let height = 1080;
-    eprintln!("Connected");
-    let mut did_spawn_reader = false;
+    for conn_index in 0..6 {
+        let response_tx = response_tx.clone();
+        //let mut conn = std::net::TcpStream::connect("wall.c3pixelflut.de:1337")?;
+        let mut conn = std::net::TcpStream::connect("table.apokalypse.email:1337")?;
+        //let mut conn = std::net::TcpStream::connect("localhost:1337")?;
+        // let conn_fd = unsafe { BorrowedFd::borrow_raw(conn.as_raw_fd()) };
+        //conn.set_nonblocking(true)?;
+        conn.set_nodelay(true)?;
+        conn.set_quickack(true)?;
 
-    loop {
+        let width = 3840;
+        let height = 1080;
+        eprintln!("Connected");
+
         let mut request = String::with_capacity("PX 1000 1000\n".len() * width * height);
         let mut response_size = 0;
 
@@ -53,25 +61,39 @@ fn main() -> Result<()> {
             }
         }
 
-        if ! did_spawn_reader {
+        let request = Vec::from(request.as_bytes());
+
+        /*let send_buf_force = request.len() * 3;
+        nix::sys::socket::setsockopt(
+            &conn_fd,
+            nix::sys::socket::sockopt::SndBufForce,
+            &send_buf_force,
+        )
+            .context("Set requested SO_SNDBUFFORCE value")?;*/
+
+
+        {
             let mut conn = conn.try_clone()?;
-            let response_tx = response_tx.clone();
-            std::thread::Builder::new().name("Reader".to_owned()).spawn(move || {
+            std::thread::Builder::new().name(format!("Reader-{conn_index}")).spawn(move || {
                 loop {
                     let mut response = vec![0; response_size];
                     conn.read_exact(&mut response).unwrap();
+                    eprintln!("Got response");
                     response_tx.send(response).unwrap();
                 }
             })?;
-            did_spawn_reader = true;
             eprintln!("Spawned reader!");
         }
 
+        std::thread::Builder::new().name(format!("Writer-{conn_index}")).spawn(move || {
+            loop {
+                eprintln!("Sent Request");
+                conn.write_all(&request).unwrap();
+                //conn.flush()?;
+            }
+        })?;
 
-        let request = request.as_bytes();
-        eprintln!("Req is {}", request.len());
-        conn.write_all(&request)?;
-        conn.flush()?;
+        eprintln!("Started connection {conn_index}");
         /*let mut request_pos = 0;
         let mut response = vec![0; response_size];
         let mut response_pos = 0;
@@ -119,5 +141,9 @@ fn main() -> Result<()> {
         //conn.read_exact(&mut response)?;
         eprintln!("Read {} bytes", response.len());
         response_tx.send(response)?;*/
+    }
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(10000));
     }
 }
